@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Plus, Trash2, Car, Zap, Shield, AlertTriangle, Info, Lightbulb, Settings } from 'lucide-react'
+import { useState, useMemo } from 'react'
+import { Plus, Trash2, Car, Zap, Shield, AlertTriangle, Info, Lightbulb, Settings, Download } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -16,6 +16,17 @@ interface Device {
   watts: number
   amps: number
   pdmOutput?: number
+  deviceType?: string
+}
+
+interface DevicePreset {
+  name: string
+  category: string
+  typicalWatts: number
+  typicalAmps: number
+  description: string
+  forceRelay: boolean
+  riskLevel: 'low' | 'medium' | 'high'
 }
 
 interface PDMConfig {
@@ -38,6 +49,8 @@ function App() {
   const [voltage, setVoltage] = useState<number>(12)
   const [devices, setDevices] = useState<Device[]>([])
   const [newDeviceName, setNewDeviceName] = useState('')
+  const [selectedDeviceType, setSelectedDeviceType] = useState<string>('')
+  const [showCustomInput, setShowCustomInput] = useState<boolean>(false)
   const [pdmConfig, setPdmConfig] = useState<PDMConfig>({
     hasPDM: false,
     inputCount: 1,
@@ -46,8 +59,76 @@ function App() {
     totalMaxAmps: 200
   })
 
+
+  const devicePresets: DevicePreset[] = [
+    { name: 'ECU (Engine Control Unit)', category: 'Engine', typicalWatts: 36, typicalAmps: 3, description: 'Engine control computer', forceRelay: false, riskLevel: 'medium' },
+    { name: 'Fuel Pump', category: 'Engine', typicalWatts: 120, typicalAmps: 10, description: 'Electric fuel pump', forceRelay: true, riskLevel: 'high' },
+    { name: 'Cooling Fan', category: 'Engine', typicalWatts: 180, typicalAmps: 15, description: 'Electric cooling fan', forceRelay: true, riskLevel: 'high' },
+    { name: 'Water Pump', category: 'Engine', typicalWatts: 240, typicalAmps: 20, description: 'Electric water pump', forceRelay: true, riskLevel: 'high' },
+    { name: 'Ignition Coils', category: 'Engine', typicalWatts: 60, typicalAmps: 5, description: 'Ignition coil pack', forceRelay: false, riskLevel: 'medium' },
+    { name: 'Fuel Injectors', category: 'Engine', typicalWatts: 48, typicalAmps: 4, description: 'Fuel injection system', forceRelay: false, riskLevel: 'medium' },
+    
+    { name: 'Digital Dashboard', category: 'Dashboard', typicalWatts: 48, typicalAmps: 4, description: 'Digital instrument cluster', forceRelay: false, riskLevel: 'low' },
+    { name: 'Analog Gauges', category: 'Dashboard', typicalWatts: 24, typicalAmps: 2, description: 'Analog gauge cluster', forceRelay: false, riskLevel: 'low' },
+    { name: 'Warning Lights', category: 'Dashboard', typicalWatts: 12, typicalAmps: 1, description: 'Dashboard warning indicators', forceRelay: false, riskLevel: 'low' },
+    { name: 'Tachometer', category: 'Dashboard', typicalWatts: 12, typicalAmps: 1, description: 'Engine RPM gauge', forceRelay: false, riskLevel: 'low' },
+    { name: 'Speedometer', category: 'Dashboard', typicalWatts: 12, typicalAmps: 1, description: 'Vehicle speed gauge', forceRelay: false, riskLevel: 'low' },
+    
+    { name: 'Nitrous System', category: 'Performance', typicalWatts: 180, typicalAmps: 15, description: 'Nitrous oxide injection system', forceRelay: true, riskLevel: 'high' },
+    { name: 'Turbo Timer', category: 'Performance', typicalWatts: 12, typicalAmps: 1, description: 'Turbocharger timer module', forceRelay: false, riskLevel: 'low' },
+    { name: 'Boost Controller', category: 'Performance', typicalWatts: 24, typicalAmps: 2, description: 'Electronic boost controller', forceRelay: false, riskLevel: 'low' },
+    { name: 'Wideband O2 Sensor', category: 'Performance', typicalWatts: 36, typicalAmps: 3, description: 'Wideband oxygen sensor controller', forceRelay: false, riskLevel: 'low' },
+    { name: 'Methanol Injection', category: 'Performance', typicalWatts: 120, typicalAmps: 10, description: 'Water/methanol injection system', forceRelay: true, riskLevel: 'medium' },
+    { name: 'Intercooler Pump', category: 'Performance', typicalWatts: 60, typicalAmps: 5, description: 'Intercooler water pump', forceRelay: false, riskLevel: 'medium' },
+    
+    { name: 'LED Light Bar', category: 'Lighting', typicalWatts: 120, typicalAmps: 10, description: 'LED light bar', forceRelay: false, riskLevel: 'medium' },
+    { name: 'Headlights (LED)', category: 'Lighting', typicalWatts: 60, typicalAmps: 5, description: 'LED headlight set', forceRelay: false, riskLevel: 'low' },
+    { name: 'Headlights (HID)', category: 'Lighting', typicalWatts: 70, typicalAmps: 6, description: 'HID xenon headlights', forceRelay: true, riskLevel: 'medium' },
+    { name: 'Fog Lights', category: 'Lighting', typicalWatts: 110, typicalAmps: 9, description: 'Halogen fog lights', forceRelay: false, riskLevel: 'medium' },
+    { name: 'Work Lights', category: 'Lighting', typicalWatts: 80, typicalAmps: 7, description: 'LED work lights', forceRelay: false, riskLevel: 'low' },
+    { name: 'Underglow LEDs', category: 'Lighting', typicalWatts: 60, typicalAmps: 5, description: 'Underglow LED strips', forceRelay: false, riskLevel: 'low' },
+    { name: 'Interior LEDs', category: 'Lighting', typicalWatts: 24, typicalAmps: 2, description: 'Interior LED lighting', forceRelay: false, riskLevel: 'low' },
+    { name: 'Rock Lights', category: 'Lighting', typicalWatts: 48, typicalAmps: 4, description: 'Underbody rock lights', forceRelay: false, riskLevel: 'low' },
+    
+    { name: 'Car Radio', category: 'Electronics', typicalWatts: 60, typicalAmps: 5, description: 'Car stereo system', forceRelay: false, riskLevel: 'low' },
+    { name: 'Amplifier', category: 'Electronics', typicalWatts: 300, typicalAmps: 25, description: 'Audio amplifier', forceRelay: true, riskLevel: 'high' },
+    { name: 'Subwoofer', category: 'Electronics', typicalWatts: 200, typicalAmps: 17, description: 'Powered subwoofer', forceRelay: true, riskLevel: 'medium' },
+    { name: 'GPS Navigation', category: 'Electronics', typicalWatts: 24, typicalAmps: 2, description: 'GPS navigation system', forceRelay: false, riskLevel: 'low' },
+    { name: 'Dash Cam', category: 'Electronics', typicalWatts: 12, typicalAmps: 1, description: 'Dashboard camera', forceRelay: false, riskLevel: 'low' },
+    { name: 'CB Radio', category: 'Electronics', typicalWatts: 60, typicalAmps: 5, description: 'CB radio transceiver', forceRelay: false, riskLevel: 'low' },
+    { name: 'Radar Detector', category: 'Electronics', typicalWatts: 12, typicalAmps: 1, description: 'Radar/laser detector', forceRelay: false, riskLevel: 'low' },
+    { name: 'Ham Radio', category: 'Electronics', typicalWatts: 120, typicalAmps: 10, description: 'Amateur radio transceiver', forceRelay: false, riskLevel: 'medium' },
+    
+    { name: 'Inverter (Small)', category: 'Power', typicalWatts: 150, typicalAmps: 13, description: '150W power inverter', forceRelay: true, riskLevel: 'medium' },
+    { name: 'Inverter (Large)', category: 'Power', typicalWatts: 600, typicalAmps: 50, description: '600W power inverter', forceRelay: true, riskLevel: 'high' },
+    { name: 'USB Charger Hub', category: 'Power', typicalWatts: 60, typicalAmps: 5, description: 'Multi-port USB charger', forceRelay: false, riskLevel: 'low' },
+    { name: 'Wireless Charger', category: 'Power', typicalWatts: 15, typicalAmps: 1, description: 'Wireless phone charger', forceRelay: false, riskLevel: 'low' },
+    { name: 'DC-DC Converter', category: 'Power', typicalWatts: 120, typicalAmps: 10, description: 'Voltage converter module', forceRelay: false, riskLevel: 'medium' },
+    
+    { name: 'Winch', category: 'Accessories', typicalWatts: 1800, typicalAmps: 150, description: 'Electric winch', forceRelay: true, riskLevel: 'high' },
+    { name: 'Air Compressor', category: 'Accessories', typicalWatts: 180, typicalAmps: 15, description: 'Air compressor', forceRelay: true, riskLevel: 'medium' },
+    { name: 'Electric Jack', category: 'Accessories', typicalWatts: 480, typicalAmps: 40, description: 'Electric car jack', forceRelay: true, riskLevel: 'high' },
+    { name: 'Tire Inflator', category: 'Accessories', typicalWatts: 120, typicalAmps: 10, description: 'Portable tire inflator', forceRelay: false, riskLevel: 'medium' },
+    { name: 'Power Tailgate', category: 'Accessories', typicalWatts: 180, typicalAmps: 15, description: 'Electric tailgate actuator', forceRelay: true, riskLevel: 'medium' },
+    { name: 'Electric Steps', category: 'Accessories', typicalWatts: 120, typicalAmps: 10, description: 'Retractable running boards', forceRelay: true, riskLevel: 'medium' },
+    
+    { name: 'Heated Seats', category: 'Comfort', typicalWatts: 90, typicalAmps: 8, description: 'Heated seat elements', forceRelay: false, riskLevel: 'low' },
+    { name: 'Seat Ventilation', category: 'Comfort', typicalWatts: 60, typicalAmps: 5, description: 'Ventilated seat fans', forceRelay: false, riskLevel: 'low' },
+    { name: 'Auxiliary Fan', category: 'Comfort', typicalWatts: 120, typicalAmps: 10, description: 'Interior cooling fan', forceRelay: false, riskLevel: 'medium' },
+    { name: 'Window Tint Heater', category: 'Comfort', typicalWatts: 180, typicalAmps: 15, description: 'Heated window tint system', forceRelay: true, riskLevel: 'medium' },
+    { name: 'Heated Mirrors', category: 'Comfort', typicalWatts: 36, typicalAmps: 3, description: 'Heated side mirrors', forceRelay: false, riskLevel: 'low' },
+    { name: 'Heated Steering Wheel', category: 'Comfort', typicalWatts: 48, typicalAmps: 4, description: 'Heated steering wheel', forceRelay: false, riskLevel: 'low' },
+    
+    { name: 'Car Alarm', category: 'Security', typicalWatts: 24, typicalAmps: 2, description: 'Car security system', forceRelay: false, riskLevel: 'low' },
+    { name: 'Remote Start', category: 'Security', typicalWatts: 36, typicalAmps: 3, description: 'Remote engine starter', forceRelay: false, riskLevel: 'medium' },
+    { name: 'Backup Camera', category: 'Security', typicalWatts: 12, typicalAmps: 1, description: 'Rear view camera system', forceRelay: false, riskLevel: 'low' },
+    { name: 'Parking Sensors', category: 'Security', typicalWatts: 24, typicalAmps: 2, description: 'Ultrasonic parking sensors', forceRelay: false, riskLevel: 'low' },
+    { name: 'Dash Security Cam', category: 'Security', typicalWatts: 24, typicalAmps: 2, description: 'Security dashboard camera', forceRelay: false, riskLevel: 'low' },
+    { name: 'GPS Tracker', category: 'Security', typicalWatts: 12, typicalAmps: 1, description: 'Vehicle tracking device', forceRelay: false, riskLevel: 'low' }
+  ]
+
   const addDevice = () => {
-    if (newDeviceName.trim()) {
+    if (selectedDeviceType === 'custom' && newDeviceName.trim()) {
       const availableOutput = pdmConfig.hasPDM ? getNextAvailablePDMOutput() : undefined
       const newDevice: Device = {
         id: Date.now().toString(),
@@ -58,6 +139,22 @@ function App() {
       }
       setDevices([...devices, newDevice])
       setNewDeviceName('')
+      setSelectedDeviceType('')
+      setShowCustomInput(false)
+    } else if (selectedDeviceType && selectedDeviceType !== 'custom') {
+      const preset = devicePresets.find(p => p.name === selectedDeviceType)
+      if (preset) {
+        const availableOutput = pdmConfig.hasPDM ? getNextAvailablePDMOutput() : undefined
+        const newDevice: Device = {
+          id: Date.now().toString(),
+          name: preset.name,
+          watts: preset.typicalWatts,
+          amps: preset.typicalAmps,
+          pdmOutput: availableOutput
+        }
+        setDevices([...devices, newDevice])
+        setSelectedDeviceType('')
+      }
     }
   }
 
@@ -75,6 +172,82 @@ function App() {
     return devices
       .filter(d => d.pdmOutput === outputNum)
       .reduce((sum, d) => sum + (d.amps || d.watts / voltage), 0)
+  }
+
+  const generateSystemDiagram = (): string => {
+    const mainFuseRating = Math.ceil(totalAmps * 1.25)
+    const mainWireGauge = totalAmps > 50 ? '4 AWG' : totalAmps > 30 ? '8 AWG' : '12 AWG'
+    
+    let diagram = `
+╔══════════════════════════════════════════════════════════════════════════════════════╗
+║                              CAR DC ELECTRICAL SYSTEM DIAGRAM                        ║
+║                                  Total Load: ${totalAmps.toFixed(1)}A @ ${voltage}V                                ║
+╚══════════════════════════════════════════════════════════════════════════════════════╝
+
+BATTERY (+12V)
+    │
+    │ ${mainWireGauge} Main Power Wire
+    │
+[${mainFuseRating}A MAIN FUSE]
+    │`
+
+    if (pdmConfig.hasPDM) {
+      diagram += `
+    │
+┌───▼───────────────────────────────────────────────────────────────────────────────┐
+│                           POWER DISTRIBUTION MODULE (PDM)                          │
+│  Input: ${pdmConfig.inputCount} @ ${pdmConfig.totalMaxAmps}A Max  │  Outputs: ${pdmConfig.outputCount} @ ${pdmConfig.maxAmpsPerOutput}A Max Each                │
+└─┬─┬─┬─┬─┬─┬─┬─┬─────────────────────────────────────────────────────────────────┘
+  │ │ │ │ │ │ │ │
+  1 2 3 4 5 6 7 8`
+
+      devices.forEach((device, index) => {
+        const safety = getSafetyRecommendation(device, pdmConfig)
+        const outputNum = device.pdmOutput || (index + 1)
+        diagram += `
+  ${outputNum === 1 ? '│' : outputNum === 2 ? '│' : outputNum === 3 ? '│' : outputNum === 4 ? '│' : outputNum === 5 ? '│' : outputNum === 6 ? '│' : outputNum === 7 ? '│' : outputNum === 8 ? '│' : ' '}
+[${safety.fuseRating}A] ──── ${device.name} (${device.amps}A, ${safety.wireGauge})`
+      })
+    } else {
+      devices.forEach((device) => {
+        const safety = getSafetyRecommendation(device)
+        diagram += `
+    │
+[${safety.fuseRating}A FUSE]${safety.needsRelay ? ' ──── [RELAY]' : ''} ──── ${device.name} (${device.amps}A, ${safety.wireGauge})`
+      })
+    }
+
+    diagram += `
+    │
+    │
+CHASSIS GROUND
+
+═══════════════════════════════════════════════════════════════════════════════════════
+SAFETY RECOMMENDATIONS:
+• Main Fuse: ${mainFuseRating}A (125% of total load)
+• Main Wire: ${mainWireGauge} minimum from battery to ${pdmConfig.hasPDM ? 'PDM' : 'fuse block'}
+• Minimum Alternator: ${Math.ceil(totalAmps * 1.3)}A (130% of load + charging)
+${pdmConfig.hasPDM ? `• PDM Total Capacity: ${pdmConfig.totalMaxAmps}A` : ''}
+${totalAmps > 50 ? '• HIGH LOAD WARNING: Professional installation recommended' : ''}
+
+Generated: ${new Date().toLocaleString()}
+Car DC Amps Calculator - https://car-dc-amps-calculator-d3el41rs.devinapps.com
+═══════════════════════════════════════════════════════════════════════════════════════`
+
+    return diagram
+  }
+
+  const downloadSystemDiagram = () => {
+    const diagram = generateSystemDiagram()
+    const blob = new Blob([diagram], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `car-electrical-system-${totalAmps.toFixed(1)}A-${voltage}V.txt`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
   }
 
   const removeDevice = (id: string) => {
@@ -97,7 +270,12 @@ function App() {
     ))
   }
 
-  const totalAmps = devices.reduce((sum, device) => sum + device.amps, 0)
+  const totalAmps = useMemo(() => {
+    return devices.reduce((sum, device) => {
+      return sum + (device.amps || device.watts / voltage)
+    }, 0)
+  }, [devices, voltage])
+
 
   const getSafetyRecommendation = (device: Device, pdm?: PDMConfig): SafetyRecommendation => {
     const amps = device.amps
@@ -107,44 +285,61 @@ function App() {
     let safetyNotes: string[] = []
     let riskLevel: 'low' | 'medium' | 'high'
 
-    if (amps <= 5) {
-      fuseRating = Math.ceil(amps * 1.25)
-      needsRelay = false
-      wireGauge = '18 AWG'
-      riskLevel = 'low'
-      safetyNotes = ['Low current device - basic fuse protection sufficient']
-    } else if (amps <= 15) {
-      fuseRating = Math.ceil(amps * 1.25)
-      needsRelay = amps > 10
-      wireGauge = amps <= 10 ? '16 AWG' : '14 AWG'
-      riskLevel = 'medium'
-      safetyNotes = [
-        'Medium current device - use quality fuse holder',
-        needsRelay ? 'Relay recommended to reduce switch load' : 'Direct switching acceptable'
-      ]
-    } else if (amps <= 30) {
-      fuseRating = Math.ceil(amps * 1.25)
-      needsRelay = true
-      wireGauge = amps <= 20 ? '12 AWG' : '10 AWG'
-      riskLevel = 'high'
-      safetyNotes = [
-        'High current device - relay REQUIRED',
-        'Use heavy-duty fuse and holder',
-        'Check all connections for tightness',
-        'Consider using a fuse block or distribution panel'
-      ]
+    // Check if device has preset configuration
+    const preset = devicePresets.find(p => p.name === device.name)
+    if (preset) {
+      needsRelay = preset.forceRelay
+      riskLevel = preset.riskLevel
+      safetyNotes.push(`${preset.description} - preset configuration applied`)
     } else {
-      fuseRating = Math.ceil(amps * 1.25)
-      needsRelay = true
-      wireGauge = amps <= 40 ? '8 AWG' : '6 AWG'
-      riskLevel = 'high'
-      safetyNotes = [
-        'VERY HIGH current device - professional installation recommended',
-        'Relay and contactor REQUIRED',
-        'Use ANL or MEGA fuse',
-        'Heavy gauge wire with proper lugs',
-        'Consider battery isolation and dedicated alternator charging'
-      ]
+      if (amps <= 5) {
+        needsRelay = false
+        riskLevel = 'low'
+        safetyNotes = ['Low current device - basic fuse protection sufficient']
+      } else if (amps <= 15) {
+        needsRelay = amps > 10
+        riskLevel = 'medium'
+        safetyNotes = [
+          'Medium current device - use quality fuse holder',
+          needsRelay ? 'Relay recommended to reduce switch load' : 'Direct switching acceptable'
+        ]
+      } else if (amps <= 30) {
+        needsRelay = true
+        riskLevel = 'high'
+        safetyNotes = [
+          'High current device - relay REQUIRED',
+          'Use heavy-duty fuse and holder',
+          'Check all connections for tightness',
+          'Consider using a fuse block or distribution panel'
+        ]
+      } else {
+        needsRelay = true
+        riskLevel = 'high'
+        safetyNotes = [
+          'VERY HIGH current device - professional installation recommended',
+          'Relay and contactor REQUIRED',
+          'Use ANL or MEGA fuse',
+          'Heavy gauge wire with proper lugs',
+          'Consider battery isolation and dedicated alternator charging'
+        ]
+      }
+    }
+
+    fuseRating = Math.ceil(amps * 1.25)
+    if (amps <= 5) {
+      wireGauge = '18 AWG'
+    } else if (amps <= 10) {
+      wireGauge = '16 AWG'
+    } else if (amps <= 15) {
+      wireGauge = '14 AWG'
+    } else if (amps <= 20) {
+      wireGauge = '12 AWG'
+    } else if (amps <= 30) {
+      wireGauge = '10 AWG'
+    } else if (amps <= 40) {
+      wireGauge = '8 AWG'
+    } else {
+      wireGauge = '6 AWG'
     }
 
     if (fuseRating > 40) {
@@ -329,16 +524,56 @@ function App() {
             <CardContent>
               <div className="space-y-4">
                 <div>
-                  <Label htmlFor="deviceName">Device Name</Label>
-                  <Input
-                    id="deviceName"
-                    placeholder="e.g., LED Light Bar, Radio, etc."
-                    value={newDeviceName}
-                    onChange={(e) => setNewDeviceName(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && addDevice()}
-                  />
+                  <Label htmlFor="deviceType">Device Type</Label>
+                  <Select value={selectedDeviceType} onValueChange={(value) => {
+                    setSelectedDeviceType(value)
+                    setShowCustomInput(value === 'custom')
+                  }}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select device type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="custom">Other (Custom Device)</SelectItem>
+                      {Object.entries(
+                        devicePresets.reduce((acc, preset) => {
+                          if (!acc[preset.category]) acc[preset.category] = []
+                          acc[preset.category].push(preset)
+                          return acc
+                        }, {} as Record<string, DevicePreset[]>)
+                      ).map(([category, presets]) => (
+                        <div key={category}>
+                          <div className="px-2 py-1 text-sm font-semibold text-gray-500 bg-gray-100">
+                            {category}
+                          </div>
+                          {presets.map((preset) => (
+                            <SelectItem key={preset.name} value={preset.name}>
+                              {preset.name} ({preset.typicalAmps}A)
+                            </SelectItem>
+                          ))}
+                        </div>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-                <Button onClick={addDevice} className="w-full" disabled={!newDeviceName.trim()}>
+                
+                {showCustomInput && (
+                  <div>
+                    <Label htmlFor="deviceName">Custom Device Name</Label>
+                    <Input
+                      id="deviceName"
+                      placeholder="e.g., Custom LED Strip, etc."
+                      value={newDeviceName}
+                      onChange={(e) => setNewDeviceName(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && addDevice()}
+                    />
+                  </div>
+                )}
+                
+                <Button 
+                  onClick={addDevice} 
+                  className="w-full" 
+                  disabled={!selectedDeviceType || (showCustomInput && !newDeviceName.trim())}
+                >
                   <Plus className="w-4 h-4 mr-2" />
                   Add Device
                 </Button>
@@ -612,9 +847,15 @@ Wire Gauge: ${safety.wireGauge} minimum`}
           <div className="mt-8">
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <AlertTriangle className="w-5 h-5" />
-                  System-Wide Safety Recommendations
+                <CardTitle className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-5 h-5" />
+                    System-Wide Safety Recommendations
+                  </div>
+                  <Button onClick={downloadSystemDiagram} variant="outline" size="sm">
+                    <Download className="w-4 h-4 mr-2" />
+                    Download Full Diagram
+                  </Button>
                 </CardTitle>
               </CardHeader>
               <CardContent>
