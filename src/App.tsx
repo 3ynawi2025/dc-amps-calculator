@@ -352,25 +352,35 @@ Car DC Amps Calculator - https://car-dc-amps-calculator-d3el41rs.devinapps.com
   }, [totalAmps, chargingSystem])
 
   const calculateWireGauge = (amps: number, length: number = wireLength): WireCalculation => {
-    const wireResistance: { [key: string]: number } = {
-      '4 AWG': 0.2485, '6 AWG': 0.3951, '8 AWG': 0.6282, '10 AWG': 0.9989,
-      '12 AWG': 1.588, '14 AWG': 2.525, '16 AWG': 4.016, '18 AWG': 6.385
-    }
+    const wireGauges = [
+      { gauge: '18 AWG', resistance: 6.385, maxAmps: 16 },
+      { gauge: '16 AWG', resistance: 4.016, maxAmps: 22 },
+      { gauge: '14 AWG', resistance: 2.525, maxAmps: 32 },
+      { gauge: '12 AWG', resistance: 1.588, maxAmps: 41 },
+      { gauge: '10 AWG', resistance: 0.9989, maxAmps: 55 },
+      { gauge: '8 AWG', resistance: 0.6282, maxAmps: 73 },
+      { gauge: '6 AWG', resistance: 0.3951, maxAmps: 101 },
+      { gauge: '4 AWG', resistance: 0.2485, maxAmps: 135 }
+    ]
     
     const tempFactor = 1 + 0.00393 * (ambientTemp - 20)
     
-    let recommendedGauge = '18 AWG'
-    let actualVoltageDrop = 100
+    let recommendedGauge = '4 AWG'
+    let actualVoltageDrop = 0
     let powerLoss = 0
     
-    for (const [gauge, resistance] of Object.entries(wireResistance)) {
-      const adjustedResistance = resistance * tempFactor
-      const totalResistance = (adjustedResistance * length * 2) / 1000
+    for (const wire of wireGauges) {
+      if (amps > wire.maxAmps * 0.8) {
+        continue
+      }
+      
+      const adjustedResistance = wire.resistance * tempFactor
+      const totalResistance = (adjustedResistance * length * 2) / 1000 // Round trip
       const voltageDrop = (amps * totalResistance / voltage) * 100
       const loss = amps * amps * totalResistance
       
       if (voltageDrop <= allowableVoltageDrop) {
-        recommendedGauge = gauge
+        recommendedGauge = wire.gauge
         actualVoltageDrop = voltageDrop
         powerLoss = loss
         break
