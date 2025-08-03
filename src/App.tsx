@@ -45,6 +45,29 @@ interface SafetyRecommendation {
   riskLevel: 'low' | 'medium' | 'high'
 }
 
+interface BatteryConfig {
+  primaryCapacity: number // Ah
+  auxiliaryCapacity: number // Ah
+  hasAuxiliary: boolean
+  batteryType: 'lead-acid' | 'agm' | 'lithium'
+  cutoffVoltage: number
+}
+
+interface ChargingSystem {
+  alternatorCapacity: number // Amps
+  alternatorEfficiency: number // 0.8-0.95
+  idleOutput: number // Amps at idle
+}
+
+interface WireCalculation {
+  length: number // feet
+  ambientTemp: number // Celsius
+  allowableVoltageDrop: number // percentage
+  recommendedGauge: string
+  actualVoltageDrop: number
+  powerLoss: number // watts
+}
+
 function App() {
   const [voltage, setVoltage] = useState<number>(12)
   const [devices, setDevices] = useState<Device[]>([])
@@ -58,6 +81,24 @@ function App() {
     maxAmpsPerOutput: 30,
     totalMaxAmps: 200
   })
+
+  const [batteryConfig, setBatteryConfig] = useState<BatteryConfig>({
+    primaryCapacity: 75,
+    auxiliaryCapacity: 100,
+    hasAuxiliary: false,
+    batteryType: 'agm',
+    cutoffVoltage: 11.8
+  })
+
+  const [chargingSystem, setChargingSystem] = useState<ChargingSystem>({
+    alternatorCapacity: 140,
+    alternatorEfficiency: 0.85,
+    idleOutput: 60
+  })
+
+  const [wireLength, setWireLength] = useState<number>(10)
+  const [ambientTemp, setAmbientTemp] = useState<number>(25)
+  const [allowableVoltageDrop, setAllowableVoltageDrop] = useState<number>(3)
 
 
   const devicePresets: DevicePreset[] = [
@@ -276,6 +317,76 @@ Car DC Amps Calculator - https://car-dc-amps-calculator-d3el41rs.devinapps.com
     }, 0)
   }, [devices, voltage])
 
+  const calculateBatteryRuntime = useMemo(() => {
+    if (totalAmps === 0) return { primary: 0, auxiliary: 0, combined: 0 }
+    
+    const dischargeFactor = batteryConfig.batteryType === 'lithium' ? 0.95 : 
+                           batteryConfig.batteryType === 'agm' ? 0.8 : 0.5
+    
+    const primaryRuntime = (batteryConfig.primaryCapacity * dischargeFactor) / totalAmps
+    const auxiliaryRuntime = batteryConfig.hasAuxiliary ? 
+                            (batteryConfig.auxiliaryCapacity * dischargeFactor) / totalAmps : 0
+    const combinedRuntime = batteryConfig.hasAuxiliary ? 
+                           ((batteryConfig.primaryCapacity + batteryConfig.auxiliaryCapacity) * dischargeFactor) / totalAmps :
+                           primaryRuntime
+    
+    return {
+      primary: primaryRuntime,
+      auxiliary: auxiliaryRuntime,
+      combined: combinedRuntime
+    }
+  }, [totalAmps, batteryConfig])
+
+  const chargingAnalysis = useMemo(() => {
+    const netLoad = totalAmps - (chargingSystem.alternatorCapacity * chargingSystem.alternatorEfficiency)
+    const idleNetLoad = totalAmps - (chargingSystem.idleOutput * chargingSystem.alternatorEfficiency)
+    
+    return {
+      alternatorSurplus: -netLoad,
+      idleSurplus: -idleNetLoad,
+      chargingCapable: netLoad < 0,
+      idleChargingCapable: idleNetLoad < 0,
+      recommendedAlternator: Math.ceil(totalAmps * 1.3),
+      efficiency: chargingSystem.alternatorEfficiency
+    }
+  }, [totalAmps, chargingSystem])
+
+  const calculateWireGauge = (amps: number, length: number = wireLength): WireCalculation => {
+    const wireResistance: { [key: string]: number } = {
+      '4 AWG': 0.2485, '6 AWG': 0.3951, '8 AWG': 0.6282, '10 AWG': 0.9989,
+      '12 AWG': 1.588, '14 AWG': 2.525, '16 AWG': 4.016, '18 AWG': 6.385
+    }
+    
+    const tempFactor = 1 + 0.00393 * (ambientTemp - 20)
+    
+    let recommendedGauge = '18 AWG'
+    let actualVoltageDrop = 100
+    let powerLoss = 0
+    
+    for (const [gauge, resistance] of Object.entries(wireResistance)) {
+      const adjustedResistance = resistance * tempFactor
+      const totalResistance = (adjustedResistance * length * 2) / 1000
+      const voltageDrop = (amps * totalResistance / voltage) * 100
+      const loss = amps * amps * totalResistance
+      
+      if (voltageDrop <= allowableVoltageDrop) {
+        recommendedGauge = gauge
+        actualVoltageDrop = voltageDrop
+        powerLoss = loss
+        break
+      }
+    }
+    
+    return {
+      length,
+      ambientTemp,
+      allowableVoltageDrop,
+      recommendedGauge,
+      actualVoltageDrop,
+      powerLoss
+    }
+  }
+
 
   const getSafetyRecommendation = (device: Device, pdm?: PDMConfig): SafetyRecommendation => {
     const amps = device.amps
@@ -326,20 +437,16 @@ Car DC Amps Calculator - https://car-dc-amps-calculator-d3el41rs.devinapps.com
     }
 
     fuseRating = Math.ceil(amps * 1.25)
-    if (amps <= 5) {
-      wireGauge = '18 AWG'
-    } else if (amps <= 10) {
-      wireGauge = '16 AWG'
-    } else if (amps <= 15) {
-      wireGauge = '14 AWG'
-    } else if (amps <= 20) {
-      wireGauge = '12 AWG'
-    } else if (amps <= 30) {
-      wireGauge = '10 AWG'
-    } else if (amps <= 40) {
-      wireGauge = '8 AWG'
-    } else {
-      wireGauge = '6 AWG'
+    
+    const wireCalc = calculateWireGauge(amps, 10)
+    wireGauge = wireCalc.recommendedGauge
+    
+    if (wireCalc.actualVoltageDrop > 3) {
+      safetyNotes.push(`⚠️ High voltage drop (${wireCalc.actualVoltageDrop.toFixed(1)}%) - consider larger wire`)
+    }
+    
+    if (ambientTemp > 40) {
+      safetyNotes.push(`🌡️ High temperature (${ambientTemp}°C) - wire derated for heat`)
     }
 
     if (fuseRating > 40) {
@@ -389,7 +496,7 @@ Car DC Amps Calculator - https://car-dc-amps-calculator-d3el41rs.devinapps.com
           <p className="text-gray-600">Calculate the total amp load for all your car's DC devices</p>
         </div>
 
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -508,6 +615,212 @@ Car DC Amps Calculator - https://car-dc-amps-calculator-d3el41rs.devinapps.com
                         </AlertDescription>
                       </Alert>
                     )}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Shield className="w-5 h-5" />
+                Power Management
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Tabs defaultValue="battery" className="w-full">
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="battery">Battery</TabsTrigger>
+                  <TabsTrigger value="charging">Charging</TabsTrigger>
+                </TabsList>
+                
+                <TabsContent value="battery" className="space-y-4">
+                  <div className="space-y-3">
+                    <div>
+                      <Label className="text-xs">Primary Battery (Ah)</Label>
+                      <Input
+                        type="number"
+                        min="20"
+                        max="200"
+                        value={batteryConfig.primaryCapacity}
+                        onChange={(e) => setBatteryConfig({...batteryConfig, primaryCapacity: Number(e.target.value)})}
+                        className="text-sm"
+                      />
+                    </div>
+                    
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        id="hasAuxiliary"
+                        checked={batteryConfig.hasAuxiliary}
+                        onChange={(e) => setBatteryConfig({...batteryConfig, hasAuxiliary: e.target.checked})}
+                        className="rounded"
+                      />
+                      <Label htmlFor="hasAuxiliary" className="text-xs">Auxiliary Battery</Label>
+                    </div>
+                    
+                    {batteryConfig.hasAuxiliary && (
+                      <div>
+                        <Label className="text-xs">Auxiliary Battery (Ah)</Label>
+                        <Input
+                          type="number"
+                          min="20"
+                          max="200"
+                          value={batteryConfig.auxiliaryCapacity}
+                          onChange={(e) => setBatteryConfig({...batteryConfig, auxiliaryCapacity: Number(e.target.value)})}
+                          className="text-sm"
+                        />
+                      </div>
+                    )}
+                    
+                    <div>
+                      <Label className="text-xs">Battery Type</Label>
+                      <Select value={batteryConfig.batteryType} onValueChange={(value: 'lead-acid' | 'agm' | 'lithium') => setBatteryConfig({...batteryConfig, batteryType: value})}>
+                        <SelectTrigger className="text-sm">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="lead-acid">Lead Acid (50% usable)</SelectItem>
+                          <SelectItem value="agm">AGM (80% usable)</SelectItem>
+                          <SelectItem value="lithium">Lithium (95% usable)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  
+                  {totalAmps > 0 && (
+                    <div className="bg-green-50 p-3 rounded-lg">
+                      <h4 className="font-semibold text-green-800 text-sm mb-2">Runtime Estimates</h4>
+                      <div className="text-xs space-y-1">
+                        <div>Primary: {calculateBatteryRuntime.primary.toFixed(1)} hours</div>
+                        {batteryConfig.hasAuxiliary && (
+                          <>
+                            <div>Auxiliary: {calculateBatteryRuntime.auxiliary.toFixed(1)} hours</div>
+                            <div>Combined: {calculateBatteryRuntime.combined.toFixed(1)} hours</div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </TabsContent>
+                
+                <TabsContent value="charging" className="space-y-4">
+                  <div className="space-y-3">
+                    <div>
+                      <Label className="text-xs">Alternator Capacity (A)</Label>
+                      <Input
+                        type="number"
+                        min="60"
+                        max="300"
+                        value={chargingSystem.alternatorCapacity}
+                        onChange={(e) => setChargingSystem({...chargingSystem, alternatorCapacity: Number(e.target.value)})}
+                        className="text-sm"
+                      />
+                    </div>
+                    
+                    <div>
+                      <Label className="text-xs">Efficiency (%)</Label>
+                      <Input
+                        type="number"
+                        min="70"
+                        max="95"
+                        value={Math.round(chargingSystem.alternatorEfficiency * 100)}
+                        onChange={(e) => setChargingSystem({...chargingSystem, alternatorEfficiency: Number(e.target.value) / 100})}
+                        className="text-sm"
+                      />
+                    </div>
+                    
+                    <div>
+                      <Label className="text-xs">Idle Output (A)</Label>
+                      <Input
+                        type="number"
+                        min="30"
+                        max="150"
+                        value={chargingSystem.idleOutput}
+                        onChange={(e) => setChargingSystem({...chargingSystem, idleOutput: Number(e.target.value)})}
+                        className="text-sm"
+                      />
+                    </div>
+                  </div>
+                  
+                  {totalAmps > 0 && (
+                    <div className={`p-3 rounded-lg ${chargingAnalysis.chargingCapable ? 'bg-green-50' : 'bg-red-50'}`}>
+                      <h4 className={`font-semibold text-sm mb-2 ${chargingAnalysis.chargingCapable ? 'text-green-800' : 'text-red-800'}`}>
+                        Charging Analysis
+                      </h4>
+                      <div className="text-xs space-y-1">
+                        <div>Surplus: {chargingAnalysis.alternatorSurplus.toFixed(1)}A</div>
+                        <div>Idle Surplus: {chargingAnalysis.idleSurplus.toFixed(1)}A</div>
+                        <div>Status: {chargingAnalysis.chargingCapable ? '✅ Can charge' : '❌ Cannot charge'}</div>
+                      </div>
+                    </div>
+                  )}
+                </TabsContent>
+              </Tabs>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Lightbulb className="w-5 h-5" />
+                Advanced Calculations
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div>
+                  <Label className="text-xs">Wire Length (feet)</Label>
+                  <Input
+                    type="number"
+                    min="1"
+                    max="50"
+                    value={wireLength}
+                    onChange={(e) => setWireLength(Number(e.target.value))}
+                    className="text-sm"
+                  />
+                </div>
+                
+                <div>
+                  <Label className="text-xs">Ambient Temperature (°C)</Label>
+                  <Input
+                    type="number"
+                    min="-20"
+                    max="80"
+                    value={ambientTemp}
+                    onChange={(e) => setAmbientTemp(Number(e.target.value))}
+                    className="text-sm"
+                  />
+                </div>
+                
+                <div>
+                  <Label className="text-xs">Max Voltage Drop (%)</Label>
+                  <Input
+                    type="number"
+                    min="1"
+                    max="5"
+                    step="0.5"
+                    value={allowableVoltageDrop}
+                    onChange={(e) => setAllowableVoltageDrop(Number(e.target.value))}
+                    className="text-sm"
+                  />
+                </div>
+                
+                {totalAmps > 0 && (
+                  <div className="bg-blue-50 p-3 rounded-lg">
+                    <h4 className="font-semibold text-blue-800 text-sm mb-2">Wire Analysis</h4>
+                    {(() => {
+                      const wireCalc = calculateWireGauge(totalAmps)
+                      return (
+                        <div className="text-xs space-y-1">
+                          <div>Recommended: {wireCalc.recommendedGauge}</div>
+                          <div>Voltage Drop: {wireCalc.actualVoltageDrop.toFixed(2)}%</div>
+                          <div>Power Loss: {wireCalc.powerLoss.toFixed(1)}W</div>
+                          <div>Length: {wireCalc.length}ft @ {wireCalc.ambientTemp}°C</div>
+                        </div>
+                      )
+                    })()}
                   </div>
                 )}
               </div>
